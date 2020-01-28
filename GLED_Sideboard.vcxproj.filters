@@ -15,11 +15,11 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <None Include="GLED_Sideboard.ino" />
-  </ItemGroup>
-  <ItemGroup>
     <ClInclude Include="__vm\.GLED_Sideboard.vsarduino.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="GLED_Sideboard.ino" />
   </ItemGroup>
 </Project>
