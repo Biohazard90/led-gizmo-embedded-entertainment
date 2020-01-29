@@ -13,13 +13,13 @@ BEGIN_EFFECT_SETTINGS(wheel, EFFECTNAME_WHEEL,
 	DECLARE_EFFECT_SETTINGS_COLOR(GizmoLED::VARNAME_COLOR, 0, 0xFF, 0)
 DECLARE_EFFECT_SETTINGS_SLIDER(GizmoLED::VARNAME_BRIGHTNESS, 96, 1, 255)
 DECLARE_EFFECT_SETTINGS_SLIDER(GizmoLED::VARNAME_SPEED, 10, 1, 100)
-DECLARE_EFFECT_SETTINGS_CHECKBOX(GizmoLED::VARNAME_RAINBOWENABLED, 1)
+DECLARE_EFFECT_SETTINGS_CHECKBOX(GizmoLED::VARNAME_RAINBOWENABLED, 0)
 DECLARE_EFFECT_SETTINGS_SLIDER(GizmoLED::VARNAME_RAINBOWLENGTH, 10, 1, 100)
 )
 EFFECT_VAR_COLOR(color)
 EFFECT_VAR_SLIDER(brightness)
 EFFECT_VAR_SLIDER(speed)
-EFFECT_VAR_COLOR(rainbowEnabled)
+EFFECT_VAR_CHECKBOX(rainbowEnabled)
 EFFECT_VAR_COLOR(rainbowLength)
 END_EFFECT_SETTINGS()
 
@@ -61,12 +61,16 @@ DECLARE_EFFECT_SETTINGS_COLOR(GizmoLED::VARNAME_COLOR1, 0xFF, 0, 0)
 DECLARE_EFFECT_SETTINGS_COLOR(GizmoLED::VARNAME_COLOR2, 0, 0, 0xFF)
 DECLARE_EFFECT_SETTINGS_SLIDER(GizmoLED::VARNAME_DECAY, 20, 1, 100)
 DECLARE_EFFECT_SETTINGS_SLIDER(GizmoLED::VARNAME_LENGTH, 75, 1, 200)
+DECLARE_EFFECT_SETTINGS_CHECKBOX(GizmoLED::VARNAME_RAINBOWENABLED, 0)
+DECLARE_EFFECT_SETTINGS_SLIDER(GizmoLED::VARNAME_RAINBOWSPEED, 10, 1, 100)
 )
 EFFECT_VAR_SLIDER(brightness)
-EFFECT_VAR_SLIDER(color1)
-EFFECT_VAR_SLIDER(color2)
+EFFECT_VAR_COLOR(color1)
+EFFECT_VAR_COLOR(color2)
 EFFECT_VAR_SLIDER(decay)
 EFFECT_VAR_SLIDER(length)
+EFFECT_VAR_CHECKBOX(rainbowEnabled)
+EFFECT_VAR_SLIDER(rainbowSpeed)
 END_EFFECT_SETTINGS()
 
 
@@ -114,9 +118,9 @@ Adafruit_NeoPixel ledAccessSideboard(LED_BUFFER_SIZE_SIDEBOARD, LED_PIN_SIDEBOAR
 Adafruit_NeoPixel ledAccessTV(LED_BUFFER_SIZE_TV, LED_PIN_TV, NEO_GRB + NEO_KHZ800);
 
 #define ADD_CLAMPED_COLOR(buffer, position, additiveColor, factor) \
-					buffer[(position) * 3] = min(255, buffer[(position) * 3] + additiveColor[1] * (factor)); \
+					{buffer[(position) * 3] = min(255, buffer[(position) * 3] + additiveColor[1] * (factor)); \
 					buffer[(position) * 3 + 1] = min(255, buffer[(position) * 3 + 1] + additiveColor[0] * (factor)); \
-					buffer[(position) * 3 + 2] = min(255, buffer[(position) * 3 + 2] + additiveColor[2] * (factor))
+					buffer[(position) * 3 + 2] = min(255, buffer[(position) * 3 + 2] + additiveColor[2] * (factor));}
 
 void setup()
 {
@@ -305,7 +309,7 @@ void AnimateWheel(float frameTime)
 		wheelTime -= 1.0f;
 	}
 
-	if (*wheelSettings::rainbowEnabled)
+	if (*wheelSettings::rainbowEnabled != 0)
 	{
 		for (int l = 0; l < LED_BUFFER_SIZE_SIDEBOARD; ++l)
 		{
@@ -404,12 +408,19 @@ void AnimateWheel(float frameTime)
 }
 
 float visualizerSpeakerFillAmount = 0.0f;
-const int sparkleCount = NUM_AUDIO_POINTS - 1;
-float visualizerSparkleTimers[sparkleCount] = { 0.0f };
-int visualizerSparklePositions[sparkleCount] = { 0 };
 
-#define SPARKLE_TIME 1.2f
-#define SPARKLE_FADE_IN 0.2f
+//const int sparkleCount = NUM_AUDIO_POINTS - 1;
+//float visualizerSparkleTimers[sparkleCount] = { 0.0f };
+//int visualizerSparklePositions[sparkleCount] = { 0 };
+//#define SPARKLE_TIME 1.2f
+//#define SPARKLE_FADE_IN 0.2f
+
+const int beatCount = NUM_AUDIO_POINTS - 1;
+float beatTimers[beatCount] = { 0.0f };
+#define BEAT_TIME 1.2f
+#define BEAT_FADE_IN 0.2f
+
+float beatRainbowHue = 0.0f;
 
 void AnimateVisualizer(float frameTime)
 {
@@ -433,6 +444,18 @@ void AnimateVisualizer(float frameTime)
 		visualizerSettings::color2[1] * brightness,
 		visualizerSettings::color2[2] * brightness
 	};
+
+	if (*visualizerSettings::rainbowEnabled)
+	{
+		beatRainbowHue += frameTime * (*visualizerSettings::rainbowSpeed * 1.0f);
+		while (beatRainbowHue >= 360.0f)
+		{
+			beatRainbowHue -= 360.0f;
+		}
+
+		HSV2RGB(beatRainbowHue, 100.0f, brightness * 100.0f, adjustedColor1);
+		HSV2RGB(fmod(beatRainbowHue + 180.0f, 360.0f), 100.0f, brightness * 100.0f, adjustedColor2);
+	}
 
 	// Speaker fill
 	for (int l = 0; l < LED_BUFFER_SIZE_SPEAKER; ++l)
@@ -487,59 +510,129 @@ void AnimateVisualizer(float frameTime)
 		writeBassSideboard += 3;
 	}
 
-	//for (int l = LED_COUNT_SIDEBOARD_BACK_SIDE + LED_COUNT_SIDEBOARD_BACK_TOP;
-	//	l < LED_COUNT_SIDEBOARD_BACK_SIDE + LED_COUNT_SIDEBOARD_BACK_TOP +
-	//	LED_COUNT_SIDEBOARD_BOTTOM_SIDE * 2 + LED_COUNT_SIDEBOARD_BOTTOM_FRONT; ++l)
-	//{
-	//}
 
-	const int sparkleSize = LED_BUFFER_SIZE_SIDEBOARD + LED_BUFFER_SIZE_TV;
-	const float sparkleDecay = *visualizerSettings::decay / 100.0f;
-	const float sparkleLength = *visualizerSettings::length;
-
-	// Update sparkle data
-	for (int s = 0; s < sparkleCount; ++s)
+	const float beatDecay = *visualizerSettings::decay / 100.0f * 10.0f;
+	for (int i = 0; i < beatCount; ++i)
 	{
-		if (visualizerSparkleTimers[s] > 0.0f)
+		// Induce new beat
+		if (GizmoLED::audioData[1 + i] > 0.0f &&
+			beatTimers[i] <= 0.0f)
 		{
-			visualizerSparkleTimers[s] -= frameTime * sparkleDecay * 10.0f;
-			if (visualizerSparkleTimers[s] <= 0.0f)
-			{
-				visualizerSparkleTimers[s] = 0.0f;
-			}
-			else
-			{
-				int basePos = visualizerSparklePositions[s] - sparkleLength / 2;
-				float sparkleB = visualizerSparkleTimers[s];
-				if (sparkleB > 1.0f)
-					sparkleB = 1.0f - (sparkleB - 1.0f) / SPARKLE_FADE_IN;
-
-				if (basePos < 0)
-					basePos += (LED_BUFFER_SIZE_SIDEBOARD + LED_BUFFER_SIZE_TV);
-
-				for (int i = 0; i < sparkleLength; ++i)
-				{
-					const int pos = (basePos + i) % (LED_BUFFER_SIZE_SIDEBOARD + LED_BUFFER_SIZE_TV);
-					const float amp = 1.0f - abs(i - sparkleLength / 2.0f) / sparkleLength * 2.0f;
-					if (pos >= LED_BUFFER_SIZE_TV)
-					{
-						ADD_CLAMPED_COLOR(ledBufferSideboard, LED_BUFFER_SIZE_SIDEBOARD - (1 + pos - LED_BUFFER_SIZE_TV), adjustedColor2, sparkleB * amp);
-					}
-					else
-					{
-						ADD_CLAMPED_COLOR(ledBufferTV, pos, adjustedColor2, sparkleB * amp);
-					}
-				}
-				continue;
-			}
+			beatTimers[i] = BEAT_TIME;
 		}
 
-		if (GizmoLED::audioData[1 + s] > 0.0f)
+		if (beatTimers[i] > 0.0f)
 		{
-			visualizerSparklePositions[s] = random(0, sparkleSize);
-			visualizerSparkleTimers[s] = SPARKLE_TIME;
+			beatTimers[i] -= frameTime * beatDecay;
+			float beatLight = beatTimers[i];
+			if (beatLight > 1.0f)
+				beatLight = 1.0f - (beatLight - 1.0f) / BEAT_FADE_IN;
+
+			switch (i)
+			{
+			case 0:
+			{
+				uint8_t *writeBeatSideboard = ledBufferSideboard + (LED_COUNT_SIDEBOARD_BACK_SIDE + LED_COUNT_SIDEBOARD_BACK_TOP) * 3;
+				for (int l = 0; l < LED_COUNT_SIDEBOARD_BOTTOM_SIDE * 2 + LED_COUNT_SIDEBOARD_BOTTOM_FRONT; ++l)
+				{
+					const float blendPercent = 1.0f - abs(l - LED_COUNT_SIDEBOARD_BOTTOM_SIDE - LED_COUNT_SIDEBOARD_BOTTOM_FRONT / 2) /
+						float(LED_COUNT_SIDEBOARD_BOTTOM_SIDE + LED_COUNT_SIDEBOARD_BOTTOM_FRONT / 2);
+
+					ADD_CLAMPED_COLOR(writeBeatSideboard, l, adjustedColor2, blendPercent * beatLight);
+				}
+			}
+			break;
+
+			case 1:
+			{
+				for (int l = LED_COUNT_SIDEBOARD_BACK_TOP; l < LED_COUNT_SIDEBOARD_BACK_TOP + LED_COUNT_SIDEBOARD_BACK_SIDE; ++l)
+					ADD_CLAMPED_COLOR(ledBufferSideboard, l, adjustedColor2, beatLight);
+
+				for (int l = LED_BUFFER_SIZE_SIDEBOARD - LED_COUNT_SIDEBOARD_BACK_TOP - LED_COUNT_SIDEBOARD_BACK_SIDE; l < LED_BUFFER_SIZE_SIDEBOARD - LED_COUNT_SIDEBOARD_BACK_TOP; ++l)
+					ADD_CLAMPED_COLOR(ledBufferSideboard, l, adjustedColor2, beatLight);
+			}
+			break;
+
+			case 2:
+			{
+				for (int l = 0; l < LED_COUNT_SIDEBOARD_BACK_TOP; ++l)
+					ADD_CLAMPED_COLOR(ledBufferSideboard, l, adjustedColor2, beatLight);
+
+				for (int l = LED_BUFFER_SIZE_SIDEBOARD - LED_COUNT_SIDEBOARD_BACK_TOP; l < LED_BUFFER_SIZE_SIDEBOARD; ++l)
+					ADD_CLAMPED_COLOR(ledBufferSideboard, l, adjustedColor2, beatLight);
+			}
+			break;
+
+			case 3:
+			{
+				for (int l = 0; l < LED_COUNT_TV_SIDE; ++l)
+				{
+					ADD_CLAMPED_COLOR(ledBufferTV, l, adjustedColor2, beatLight);
+					ADD_CLAMPED_COLOR(ledBufferTV, LED_COUNT_TV_SIDE + LED_COUNT_TV_TOP + l, adjustedColor2, beatLight);
+				}
+			}
+			break;
+
+			case 4:
+			{
+				for (int l = 0; l < LED_COUNT_TV_TOP; ++l)
+				{
+					ADD_CLAMPED_COLOR(ledBufferTV, LED_COUNT_TV_SIDE + l, adjustedColor2, beatLight);
+				}
+			}
+			break;
+			}
 		}
 	}
+
+
+	//const int sparkleSize = LED_BUFFER_SIZE_SIDEBOARD + LED_BUFFER_SIZE_TV;
+	//const float sparkleDecay = *visualizerSettings::decay / 100.0f;
+	//const float sparkleLength = *visualizerSettings::length;
+
+	//// Update sparkle data
+	//for (int s = 0; s < sparkleCount; ++s)
+	//{
+	//	if (visualizerSparkleTimers[s] > 0.0f)
+	//	{
+	//		visualizerSparkleTimers[s] -= frameTime * sparkleDecay * 10.0f;
+	//		if (visualizerSparkleTimers[s] <= 0.0f)
+	//		{
+	//			visualizerSparkleTimers[s] = 0.0f;
+	//		}
+	//		else
+	//		{
+	//			int basePos = visualizerSparklePositions[s] - sparkleLength / 2;
+	//			float sparkleB = visualizerSparkleTimers[s];
+	//			if (sparkleB > 1.0f)
+	//				sparkleB = 1.0f - (sparkleB - 1.0f) / SPARKLE_FADE_IN;
+
+	//			if (basePos < 0)
+	//				basePos += (LED_BUFFER_SIZE_SIDEBOARD + LED_BUFFER_SIZE_TV);
+
+	//			for (int i = 0; i < sparkleLength; ++i)
+	//			{
+	//				const int pos = (basePos + i) % (LED_BUFFER_SIZE_SIDEBOARD + LED_BUFFER_SIZE_TV);
+	//				const float amp = 1.0f - abs(i - sparkleLength / 2.0f) / sparkleLength * 2.0f;
+	//				if (pos >= LED_BUFFER_SIZE_TV)
+	//				{
+	//					ADD_CLAMPED_COLOR(ledBufferSideboard, LED_BUFFER_SIZE_SIDEBOARD - (1 + pos - LED_BUFFER_SIZE_TV), adjustedColor2, sparkleB * amp);
+	//				}
+	//				else
+	//				{
+	//					ADD_CLAMPED_COLOR(ledBufferTV, pos, adjustedColor2, sparkleB * amp);
+	//				}
+	//			}
+	//			continue;
+	//		}
+	//	}
+
+	//	if (GizmoLED::audioData[1 + s] > 0.0f)
+	//	{
+	//		visualizerSparklePositions[s] = random(0, sparkleSize);
+	//		visualizerSparkleTimers[s] = SPARKLE_TIME;
+	//	}
+	//}
 }
 
 void AnimateTest(float frameTime)
